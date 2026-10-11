@@ -1,0 +1,4 @@
+# One search URL per line. Copy URLs from idealista.com after applying filters.
+# Each URL contributes only its first results page (pagination is disallowed by robots.txt).
+https://www.idealista.com/venta-viviendas/madrid/
+https://www.idealista.com/alquiler-viviendas/madrid/
