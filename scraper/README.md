@@ -1,3 +1,7 @@
+# NOTE FROM STUDENTS
+
+This is an auxiliary part of the project. Given that we are struggling to get access to Idealista's official data API, we took the initiative and asked claude to build us a web scraper so we can get high quality real estate data easily, without delay, or API restrictions. 
+
 # Idealista scraper
 
 Collects property listings (sale and rent) from [idealista.com](https://www.idealista.com)
