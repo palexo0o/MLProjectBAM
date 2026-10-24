@@ -1,0 +1,11 @@
+name: MLProjectBAM
+channels: 
+  - conda-forge
+dependencies:
+  - python >= 3.13
+  - numpy
+  - pandas
+  - matplotlib
+  - pip
+  - scikit-learn
+  - seaborn
