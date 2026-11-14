@@ -12,42 +12,31 @@ except ModuleNotFoundError:
     from data_acquire import load_df
 
 
-# What renters actually pay per month. Predicting this (not price_eur) matches the consumer question.
-TARGET = "total_monthly_cost"
+# Monthly rent in euros for a whole flat.
+TARGET = "Rent"
 
-# Columns that are the target, a component of it, or identifiers / free text.
-# total_monthly_cost == price_eur + extra_monthly_cost exactly, so using either as a feature leaks the target.
-EXCLUDED = [
-    "listing_id",
-    "property_type",
-    "title",
-    "url",
-    "street",
-    "house_number",
-    "extra_cost_note",
-    "available_date",
-    "price_eur",
-    "extra_monthly_cost",
-    TARGET,
-]
+# Columns that are the target or an identifier / free text.
+EXCLUDED = ["Id", "Address", "Number", TARGET]
 
 NUMERIC_COLS = [
-    "size_m2",          # ~88% missing: imputed, plus a missing-indicator column
-    "total_beds",       # likely flat-level capacity, not per-room; verify against listing text
-    "num_occupants",
-    "online_booking",
-    "has_insurance",
-    "page_scraped",
+    "Bedrooms",
+    "Sq.Mt",       # complete in this dataset
+    "Floor",       # -1 = basement; implausible values (outside -1..MAX_FLOOR) are set to missing in prepare_xy
+    "Outer",       # 1 = exterior-facing
+    "Elevator",
+    "Penthouse",   # 0/1 property-type flags
+    "Cottage",
+    "Duplex",
+    "Semidetached",
 ]
 
-# Neighborhood has 112 levels, median 7 listings each. Levels with fewer than MIN_FREQ rows are pooled.
+# Area is the neighbourhood (140 levels); District is the wider district (20 levels).
 CATEGORICAL_COLS = [
-    "neighborhood",
-    "gender_policy",
-    "smoking_policy",
-    "utilities_included",
+    "Area",
+    "District",
 ]
 MIN_FREQ = 10
+MAX_FLOOR = 30
 
 
 def build_preprocessor() -> ColumnTransformer:
@@ -79,6 +68,7 @@ def prepare_xy(df_input: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     work = df_input.copy()
     for col in NUMERIC_COLS:
         work[col] = pd.to_numeric(work[col], errors="coerce")
+    work["Floor"] = work["Floor"].where(work["Floor"].between(-1, MAX_FLOOR))
     X = work[NUMERIC_COLS + CATEGORICAL_COLS].copy()
     y = pd.to_numeric(work[TARGET], errors="coerce").astype(float)
     return X, y
