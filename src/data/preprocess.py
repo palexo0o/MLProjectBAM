@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
 
 try:
     from src.data.data_acquire import load_df
@@ -12,70 +12,83 @@ except ModuleNotFoundError:
     from data_acquire import load_df
 
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "processed"
-OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+# What renters actually pay per month. Predicting this (not price_eur) matches the consumer question.
+TARGET = "total_monthly_cost"
+
+# Columns that are the target, a component of it, or identifiers / free text.
+# total_monthly_cost == price_eur + extra_monthly_cost exactly, so using either as a feature leaks the target.
+EXCLUDED = [
+    "listing_id",
+    "property_type",
+    "title",
+    "url",
+    "street",
+    "house_number",
+    "extra_cost_note",
+    "available_date",
+    "price_eur",
+    "extra_monthly_cost",
+    TARGET,
+]
+
+NUMERIC_COLS = [
+    "size_m2",          # ~88% missing: imputed, plus a missing-indicator column
+    "total_beds",       # likely flat-level capacity, not per-room; verify against listing text
+    "num_occupants",
+    "online_booking",
+    "has_insurance",
+    "page_scraped",
+]
+
+# Neighborhood has 112 levels, median 7 listings each. Levels with fewer than MIN_FREQ rows are pooled.
+CATEGORICAL_COLS = [
+    "neighborhood",
+    "gender_policy",
+    "smoking_policy",
+    "utilities_included",
+]
+MIN_FREQ = 10
 
 
-def prepare_ml_matrix(df_input: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """Clean the dataset, encode categorical fields, standardize numeric features, and return ML-ready arrays."""
+def build_preprocessor() -> ColumnTransformer:
+    """Imputation and encoding only. No scaling here: scaling is model-specific, and every step is fit inside each CV fold."""
+    numeric = Pipeline(
+        [
+            ("impute", SimpleImputer(strategy="median", add_indicator=True)),
+        ]
+    )
+    categorical = Pipeline(
+        [
+            ("impute", SimpleImputer(strategy="constant", fill_value="unknown")),
+            (
+                "onehot",
+                OneHotEncoder(handle_unknown="infrequent_if_exist", min_frequency=MIN_FREQ, sparse_output=False),
+            ),
+        ]
+    )
+    return ColumnTransformer(
+        [
+            ("num", numeric, NUMERIC_COLS),
+            ("cat", categorical, CATEGORICAL_COLS),
+        ]
+    )
+
+
+def prepare_xy(df_input: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    """Return the raw feature frame and the target. Transformation happens inside a fitted pipeline, not here."""
     work = df_input.copy()
-
-    numeric_cols = [
-        "extra_monthly_cost",
-        "total_monthly_cost",
-        "size_m2",
-        "total_beds",
-        "num_occupants",
-        "online_booking",
-        "has_insurance",
-        "page_scraped",
-        "house_number",
-    ]
-    categorical_cols = [
-        "neighborhood",
-        "gender_policy",
-        "smoking_policy",
-        "utilities_included",
-        "city",
-    ]
-
-    for col in numeric_cols:
+    for col in NUMERIC_COLS:
         work[col] = pd.to_numeric(work[col], errors="coerce")
-
-    for col in categorical_cols:
-        work[col] = work[col].fillna("unknown")
-
-    y = work["price_eur"].astype(float).copy()
-    feature_df = work.drop(columns=["listing_id", "property_type", "title", "url", "street", "extra_cost_note", "available_date", "price_eur"])
-
-    X_num = feature_df[numeric_cols].copy()
-    X_num = X_num.fillna(X_num.median())
-
-    X_cat = pd.get_dummies(feature_df[categorical_cols], drop_first=True)
-    X = pd.concat([X_num, X_cat], axis=1)
-    X = X.apply(pd.to_numeric, errors="coerce")
-    X = X.fillna(X.median())
-
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X.to_numpy(dtype=np.float64))
-    y_array = y.to_numpy(dtype=np.float64)
-
-    return X_scaled, y_array, X.columns.tolist()
+    X = work[NUMERIC_COLS + CATEGORICAL_COLS].copy()
+    y = pd.to_numeric(work[TARGET], errors="coerce").astype(float)
+    return X, y
 
 
 if __name__ == "__main__":
     df = load_df()
-    X_scaled, y, columns = prepare_ml_matrix(df)
-    np.save(OUTPUT_DIR / "X_scaled.npy", X_scaled)
-    np.save(OUTPUT_DIR / "y.npy", y)
-    np.save(OUTPUT_DIR / "feature_names.npy", np.array(columns, dtype=object))
-
+    X, y = prepare_xy(df)
+    Xt = build_preprocessor().fit_transform(X)
     print(f"Loaded dataset shape: {df.shape}")
-    print(f"Scaled feature matrix shape: {X_scaled.shape}")
-    print(f"Target vector shape: {y.shape}")
-    print("Saved arrays:")
-    print(OUTPUT_DIR / "X_scaled.npy")
-    print(OUTPUT_DIR / "y.npy")
-    print(OUTPUT_DIR / "feature_names.npy")
-    print("\nFirst scaled sample:")
-    print(X_scaled[0])
+    print(f"Feature frame shape (pre-encoding): {X.shape}")
+    print(f"Encoded matrix shape (fit on full data, for inspection only): {Xt.shape}")
+    print(f"Target: {TARGET}, mean {y.mean():.1f}, min {y.min():.0f}, max {y.max():.0f}")
