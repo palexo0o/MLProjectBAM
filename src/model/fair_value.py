@@ -1,4 +1,4 @@
-"""Fair-value model: estimate what a Madrid room should cost, then label listings by how far they sit from that estimate.
+"""Fair-value model: estimate what a Madrid flat should rent for, then label listings by how far they sit from that estimate.
 
 Run from the repo root:  python -m src.model.fair_value
 
@@ -19,6 +19,10 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import KFold, cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 try:
     from src.data.data_acquire import load_df
@@ -111,7 +115,7 @@ def main() -> None:
 
     out = pd.DataFrame(
         {
-            "listing_id": df["listing_id"].to_numpy(),
+            "Id": df["Id"].to_numpy(),
             "actual_eur": actual,
             "predicted_eur": pred.round(2),
             "gap_pct": (gap * 100).round(2),
