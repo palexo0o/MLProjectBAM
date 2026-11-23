@@ -1,18 +1,18 @@
 """Shared colours and plot style for the fair-value notebooks.
 
-One colour per flag, used in every figure:
-    overpriced     orange
-    fair           blue
-    below typical  green (teal)
+One colour per flag, used in every figure and in the report (Okabe-Ito, colour-blind safe):
+    overpriced     orange  #D55E00
+    fair           blue    #0072B2
+    below typical  green   #009E73
 """
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 
 PAL = {
-    "primary": "#2a78d6",   # blue: fair
-    "accent": "#eb6834",    # orange: overpriced
-    "teal": "#1baf7a",      # green: below typical
+    "primary": "#0072B2",   # blue: fair
+    "accent": "#D55E00",    # orange: overpriced
+    "teal": "#009E73",      # green: below typical
     "ink": "#1f1f1e",
     "muted": "#6b6a66",
     "grid": "#e6e5e1",
