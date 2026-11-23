@@ -1,0 +1,23 @@
+Computing setup
+
+Hardware and operating system
+  Machine:        Apple M1 laptop (8 CPU cores, 8 GB unified memory)
+  Operating system: macOS 15.6
+
+Software
+  Python:         3.15.1 (conda environment "MLProjectBAM", used to run fair_value.py and the notebooks in VS Code)
+  Python:         3.12.12 (base conda environment, used to execute notebooks from the command line with nbconvert 7.17.2)
+  numpy           2.5.4 (MLProjectBAM) / 2.4.3 (base)
+  pandas          3.1.0 (MLProjectBAM) / 3.0.2 (base)
+  scikit-learn    1.9.1 (MLProjectBAM) / 1.8.0 (base)
+  matplotlib      3.11.2 (MLProjectBAM) / 3.10.8 (base)
+  geopandas       1.2.0 (both), with pyogrio 0.13.0 for reading shapefiles
+
+Run times (wall clock, this machine)
+  src/model/fair_value.py (5-fold CV for three models, conformal calibration, flags): about 18 s
+  src/model/fair_value_results.ipynb (full execution): about 28 s
+  src/model/fair_value_map.ipynb (full execution): about 38 s, including barrio assignment and the rent surface grid
+  Geocoding of 1,321 unique addresses (Nominatim, one request per second): about 25 minutes, run once; results are cached
+
+Random seeds
+  Cross-validation folds and the conformal split use random_state = 0. Gradient boosting uses random_state = 0.
