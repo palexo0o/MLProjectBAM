@@ -135,6 +135,43 @@ def label_from_score(score: np.ndarray) -> np.ndarray:
     return out
 
 
+def fit_intervals(X: pd.DataFrame, y_log: np.ndarray, best: str) -> dict:
+    """Three-way split: train (point and scale models), calibration (sets q), test (checks coverage).
+
+    Returns the calibrated multipliers, the per-flat error scale for every flat, and test-set coverage for both
+    the constant-width and heteroscedastic intervals, so the report and the flag file use one code path.
+    """
+    idx = np.arange(len(y_log))
+    idx_train, idx_rest = train_test_split(idx, test_size=CAL_FRAC + TEST_FRAC, random_state=SEED)
+    idx_cal, idx_test = train_test_split(idx_rest, test_size=TEST_FRAC / (CAL_FRAC + TEST_FRAC), random_state=SEED)
+    X_tr, X_cal, X_te = X.iloc[idx_train], X.iloc[idx_cal], X.iloc[idx_test]
+    y_tr, y_cal, y_te = y_log[idx_train], y_log[idx_cal], y_log[idx_test]
+
+    # Point model on the training split.
+    point_model = make_models()[best].fit(X_tr, y_tr)
+    cal_pred, te_pred = point_model.predict(X_cal), point_model.predict(X_te)
+
+    # Scale model: learn each flat's typical error from OUT-OF-FOLD residuals inside the training split,
+    # so the scale is not fitted to residuals the point model has already memorised.
+    oof_tr = cross_val_predict(make_models()[best], X_tr, y_tr, cv=KFold(N_FOLDS, shuffle=True, random_state=SEED))
+    scale_model = make_scale_model().fit(X_tr, np.log(np.abs(y_tr - oof_tr) + SCALE_EPS))
+    sigma_all = np.exp(scale_model.predict(X))          # per-flat error scale, for every flat
+    sigma_cal, sigma_te = sigma_all[idx_cal], sigma_all[idx_test]
+
+    q_const = conformal_halfwidth(np.abs(y_cal - cal_pred))                 # constant width, for comparison
+    q_het = conformal_halfwidth(np.abs(y_cal - cal_pred) / sigma_cal)       # heteroscedastic multiplier
+
+    half_het_te = q_het * sigma_te
+    return {
+        "idx_train": idx_train, "idx_cal": idx_cal, "idx_test": idx_test,
+        "y_test": y_te, "test_pred": te_pred,
+        "q_const": q_const, "q_het": q_het, "sigma_all": sigma_all,
+        "half_het_test": half_het_te,
+        "covered_const": np.abs(y_te - te_pred) <= q_const,
+        "covered_het": np.abs(y_te - te_pred) <= half_het_te,
+    }
+
+
 def main() -> None:
     df = load_df()
     X, y = prepare_xy(df)
@@ -157,50 +194,27 @@ def main() -> None:
     best = min((n for n in results if n != "baseline_median"), key=lambda n: results[n]["MAE_eur"])
     print(f"\nBest model by MAE (euros): {best}")
 
-    # Three-way split: train (fit point and scale models), calibration (set q), test (check coverage).
-    idx = np.arange(len(y))
-    idx_train, idx_rest = train_test_split(idx, test_size=CAL_FRAC + TEST_FRAC, random_state=SEED)
-    idx_cal, idx_test = train_test_split(idx_rest, test_size=TEST_FRAC / (CAL_FRAC + TEST_FRAC), random_state=SEED)
-    X_tr, X_cal, X_te = X.iloc[idx_train], X.iloc[idx_cal], X.iloc[idx_test]
-    y_tr, y_cal, y_te = y_log[idx_train], y_log[idx_cal], y_log[idx_test]
-
-    # Point model on the training split.
-    point_model = make_models()[best].fit(X_tr, y_tr)
-    cal_pred, te_pred = point_model.predict(X_cal), point_model.predict(X_te)
-
-    # Scale model: learn each flat's typical error from OUT-OF-FOLD residuals inside the training split,
-    # so the scale is not fitted to residuals the point model has already memorised.
-    oof_tr = cross_val_predict(make_models()[best], X_tr, y_tr, cv=KFold(N_FOLDS, shuffle=True, random_state=SEED))
-    scale_model = make_scale_model().fit(X_tr, np.log(np.abs(y_tr - oof_tr) + SCALE_EPS))
-    sigma_all = np.exp(scale_model.predict(X))          # per-flat error scale, for every flat
-    sigma_cal, sigma_te = sigma_all[idx_cal], sigma_all[idx_test]
-
-    # Homoscedastic baseline (constant width), kept for comparison.
-    q_const = conformal_halfwidth(np.abs(y_cal - cal_pred))
-    # Heteroscedastic interval: conformal on normalised scores |r| / sigma.
-    q_het = conformal_halfwidth(np.abs(y_cal - cal_pred) / sigma_cal)
+    iv = fit_intervals(X, y_log, best)
 
     def summarise(name, half_te, covered):
         width_pct = np.median((np.exp(2 * half_te)) - 1) * 100
         return {"method": name, "test_coverage_%": round(covered.mean() * 100, 1),
                 "median_width_%_of_pred": round(width_pct, 1), "n_test": len(covered)}
 
-    cov_const = (y_te >= te_pred - q_const) & (y_te <= te_pred + q_const)
-    half_het_te = q_het * sigma_te
-    cov_het = (y_te >= te_pred - half_het_te) & (y_te <= te_pred + half_het_te)
     comparison = pd.DataFrame([
-        summarise("constant width", np.full(len(y_te), q_const), cov_const),
-        summarise("heteroscedastic", half_het_te, cov_het),
+        summarise("constant width", np.full(len(iv["y_test"]), iv["q_const"]), iv["covered_const"]),
+        summarise("heteroscedastic", iv["half_het_test"], iv["covered_het"]),
     ])
     print("\nInterval comparison on held-out test flats (target coverage {:.0f}%):".format(100 * (1 - ALPHA)))
     print(comparison.to_string(index=False))
     print("\nHeteroscedastic coverage by predicted-rent band (checks for under-covered price ranges):")
-    print(coverage_by_group(cov_het, np.exp(te_pred)).to_string(index=False))
+    print(coverage_by_group(iv["covered_het"], np.exp(iv["test_pred"])).to_string(index=False))
 
     # Flags for every flat use out-of-fold point predictions and the per-flat half-width.
     pred = oof_preds[best]
     gap = np.log(actual / pred)
-    halfwidth = q_het * sigma_all
+    sigma_all = iv["sigma_all"]
+    halfwidth = iv["q_het"] * sigma_all
     score = gap / halfwidth
     labels = label_from_score(score)
 
