@@ -9,3 +9,9 @@ dependencies:
   - pip
   - scikit-learn
   - seaborn
+  - openpyxl
+  - geopandas
+  - pyogrio
+  - shapely
+  - requests
+  - jupyterlab
